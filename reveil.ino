@@ -87,7 +87,7 @@ void setup(void)
 
   P.setZone(0, 0, MAX_DEVICES-5);
   P.setZone(1, MAX_DEVICES-4, MAX_DEVICES-1);
-  P.setFont(1, numeric7Seg);
+  P.setFont(1, numeric7Seg_Byfeel);
 
   P.setInvert(false);
   P.displayZoneText(1, szTime, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
