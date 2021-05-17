@@ -14,6 +14,9 @@
 
 #include "Font_Data.h"
 
+#include <DS3231.h>
+#include <Wire.h>
+
 // Define the number of devices we have in the chain and the hardware interface
 // NOTE: These pin numbers will probably not work with your hardware and may
 // need to be adapted
@@ -37,12 +40,6 @@
 #define LED_PIN 9
 #define SWITCH_PIN 6
 
-#include <RTC.h>
-#include <Wire.h>
-static DS3231 RTC;
-
-// Arbitrary output pins
- MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
 #define SPEED_TIME  75
 #define PAUSE_TIME  0
@@ -55,29 +52,31 @@ static DS3231 RTC;
 // Global variables
 char szTime[11];    // mm:ss\0
 char szMesg[MAX_MESG+1] = "";
+boolean siecle =false;
 int mode = 0;
+  boolean h12Flag,pmFlag;
 const uint32_t PAUSE_BOUTON = 1000;
 static uint32_t lastTime2 = 0; // millis() memory
-DateTime Alarm1;
-
+// Arbitrary output pins
+MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+DS3231 horloge;
 
 void getTime(char *psz, bool f = true)
 // Code for reading clock time
 {
   char secondes[3]; // pour affichage des secondes
-  sprintf(secondes,"%02d",RTC.getSeconds());
+  sprintf(secondes,"%02d",horloge.getSecond());
   secondes[0]=secondes[0]+23; // permutation codes AScci 71 à 80
   secondes[1]=secondes[1]+23;
 
-  sprintf(psz, "%02d%c%02d %c%c", RTC.getHours(), (f ? ':' : ' '), RTC.getMinutes(),secondes[0],secondes[1]);
+  sprintf(psz, "%02d%c%02d %c%c", horloge.getHour(h12Flag,pmFlag), (f ? ':' : ' '), horloge.getMinute(),secondes[0],secondes[1]);
 
 }
 
 void getDate(char *psz)
 // Code for reading clock date
 {
-  char  szBuf[10];
-  sprintf(psz, "%02d/%02d", RTC.getDay(), RTC.getMonth());
+  sprintf(psz, "%02d/%02d", horloge.getDate(), horloge.getMonth(siecle));
 }
 
 void setup(void)
@@ -110,25 +109,11 @@ void setup(void)
   P.displayZoneText(1, szTime, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
   P.displayZoneText(0, szMesg, PA_CENTER, SPEED_TIME, 0, PA_PRINT, PA_NO_EFFECT);
 
- 
-
-  RTC.begin();
-  RTC.stopClock();
-  RTC.setHourMode(CLOCK_H24);
-  RTC.setDateTime(__DATE__, __TIME__);
-  RTC.startClock();
-  getTime(szTime);
-  Alarm1 = RTC.getAlarm1();
-
-  
-
+  // Start the I2C interface
+   Wire.begin();
+   horloge.setClockMode(false);
+   getTime(szTime);
    Serial.begin (115200);
-
-    Serial.print("INT/SQW Pin Mode : ");
-  if (RTC.getINTPinMode())
-    Serial.println("Alarm");
-  else
-    Serial.println("SQW");
 }
 
 void loop(void)
@@ -147,16 +132,16 @@ void loop(void)
     reglageAlarme();
     mode = 0;
   }
-  if (digitalRead(SWITCH_PIN) == HIGH && !RTC.isAlarm1Enabled())
+  if (digitalRead(SWITCH_PIN) == HIGH && !horloge.checkAlarmEnabled(1))
     {
-      RTC.enableAlarm1();
+      horloge.turnOnAlarm(1);
     }
-    else if ( digitalRead(SWITCH_PIN) == LOW && RTC.isAlarm1Enabled() )
+    else if ( digitalRead(SWITCH_PIN) == LOW && horloge.checkAlarmEnabled(1) )
     {
-      RTC.disableAlarm1();
+      horloge.turnOffAlarm(1);
     }
 
-  if ( RTC.isAlarm1Enabled() )
+  if ( horloge.checkAlarmEnabled(1) )
   {
     digitalWrite(LED_PIN,HIGH);
   }
@@ -167,16 +152,16 @@ void loop(void)
   if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON )
   {
     mode =1;
-    Serial.print("boutton pousse mode");
-    Serial.println(mode);
+    Serial.println("activation reglage Horloge");
     lastTime2 = millis();
   }
   if (digitalRead(ALA_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON )
   {
     mode =2;
+    Serial.println("activation reglage Alarme");
     lastTime2 = millis();
   }
-  if (RTC.isAlarm1Tiggered())
+  if (horloge.checkIfAlarm(1))
   {
     digitalWrite(LED_ALA_PIN,HIGH);
     Serial.println("Alarme declenchée");
@@ -213,14 +198,13 @@ void reglageHorloge(void)
   int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
   byte reglage =0;
-  byte valeur = RTC.getHours();
-  byte h = valeur;
-  byte m = RTC.getMinutes();
-  RTC.stopClock();
+  byte valeur = horloge.getHour(h12Flag,pmFlag);
+  byte heure;
+  byte minu=horloge.getMinute();
   byte modulo = 24;
   while (reglage <2)
   {
-      P.displayAnimate();
+    P.displayAnimate();
     strcpy(szMesg, "Horloge");
     P.displayReset(0);
     
@@ -229,33 +213,33 @@ void reglageHorloge(void)
       sprintf(szTime, "%02d%:", valeur);
     }else
     {
-     sprintf(szTime, "%02d:%02d", h , valeur);
+     sprintf(szTime, "%02d:%02d", heure , valeur);
     }
     P.displayReset(1);
     
     if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON)
     {
-      Serial.print("Reglage Horloge reglage ");
-      Serial.print(reglage);
-      Serial.print(" valeur ");
-      Serial.println(valeur);
+      Serial.print("Reglage Horloge ");
+
       if (reglage == 0)
       {
-        h = valeur;
-        Serial.print("Valeur minutes ");
-        Serial.println(m);
-        valeur = m;
+        
+        heure=valeur;
+        
+        
+        Serial.print("Valeur minutes ");   
+        valeur = minu;
         modulo = 60;
       }
       else
       {
-        Serial.print("mise a jour heure ");
-        Serial.print(h);
-        RTC.setHours(h);
-        RTC.setMinutes(valeur);
+        
+        horloge.setHour(heure);
+        horloge.setMinute(valeur);
+        Serial.print("mise a jour Heure ");
+        Serial.println(horloge.getHour(h12Flag,pmFlag));
         Serial.print("mise a jour minutes ");
-        Serial.println(valeur);
-        RTC.startClock();
+        Serial.println(horloge.getMinute());
       }
       reglage ++;
       lastTime2 = millis();
@@ -296,8 +280,11 @@ void reglageAlarme(void)
   int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
   byte reglage =0;
-  byte valeur = Alarm1.hours;
   byte modulo = 24;
+  byte jourAlarme, heureAlarme, minuteAlarme, secondeAlarme, alarmBits;
+  bool alarmDy, alarmH12Flag, alarmPmFlag;
+  horloge.getA1Time(jourAlarme,heureAlarme,minuteAlarme,secondeAlarme,alarmBits, alarmDy, alarmH12Flag, alarmPmFlag);
+  byte valeur = heureAlarme;
   while (reglage <2)
   {
       P.displayAnimate();
@@ -309,7 +296,7 @@ void reglageAlarme(void)
       sprintf(szTime, "%02d%:", valeur);
     }else
     {
-     sprintf(szTime, "%02d:%02d", Alarm1.hours , valeur);
+     sprintf(szTime, "%02d:%02d",heureAlarme , valeur);
     }
     P.displayReset(1);
     
@@ -321,21 +308,22 @@ void reglageAlarme(void)
       Serial.println(valeur);
       if (reglage == 0)
       {
-        Alarm1.hours = valeur;
+        heureAlarme = valeur;
         Serial.print("Valeur minutes ");
-        Serial.println(Alarm1.minutes);
-        valeur = Alarm1.minutes;
+        Serial.println(minuteAlarme);
+        valeur = minuteAlarme;
         modulo = 60;
       }
       else
       {
+        minuteAlarme = valeur;
         Serial.print("mise a jour heure ");
-        Serial.print(Alarm1.hours);
-        
+        Serial.print(heureAlarme);
         Serial.print("mise a jour minutes ");
-        Serial.println(valeur);
-        Alarm1.minutes = valeur;
-        RTC.setAlarm1(0, Alarm1.hours, Alarm1.minutes, 0);
+        Serial.println(minuteAlarme);
+        horloge.turnOffAlarm(1);
+        horloge.setA1Time(0, heureAlarme, minuteAlarme, 0,0x8,false,false,false);
+        horloge.turnOnAlarm(1);
       }
       reglage ++;
       lastTime2 = millis();
@@ -369,5 +357,4 @@ void reglageAlarme(void)
    // Préparation de la prochaine exécution:
    Pin_clk_Letzter = Pin_clk_Aktuell;
   }
-  Alarm1 = RTC.getAlarm1();  
 }
