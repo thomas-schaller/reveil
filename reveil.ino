@@ -33,13 +33,14 @@
 
 #define HOR_BU_PIN 7 
 #define ALA_BU_PIN 8 
+#define AFF_BU_PIN 4
 
 #define LED_ALA_PIN A3
 
 //info alarme
 #define LED_PIN 9
 #define SWITCH_PIN 6
-
+#define BUZZER_PIN A2
 
 #define SPEED_TIME  75
 #define PAUSE_TIME  0
@@ -57,9 +58,11 @@ int mode = 0;
   boolean h12Flag,pmFlag;
 const uint32_t PAUSE_BOUTON = 1000;
 static uint32_t lastTime2 = 0; // millis() memory
+byte joursDansMois [] = {31,28,31,30,31,30,31,31,30,31,30,31};
 // Arbitrary output pins
 MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 DS3231 horloge;
+boolean alarmeDeclenchee = false;
 
 void getTime(char *psz, bool f = true)
 // Code for reading clock time
@@ -79,6 +82,15 @@ void getDate(char *psz)
   sprintf(psz, "%02d/%02d", horloge.getDate(), horloge.getMonth(siecle));
 }
 
+void getAlarme(char *psz)
+// Code for alarm
+{
+  byte jourAlarme, heureAlarme, minuteAlarme, secondeAlarme, alarmBits;
+  bool alarmDy, alarmH12Flag, alarmPmFlag;
+  horloge.getA1Time(jourAlarme,heureAlarme,minuteAlarme,secondeAlarme,alarmBits, alarmDy, alarmH12Flag, alarmPmFlag);
+  sprintf(psz, "%02d:%02d", heureAlarme, minuteAlarme);
+}
+
 void setup(void)
 {
 
@@ -88,7 +100,7 @@ void setup(void)
    
    pinMode (HOR_BU_PIN,INPUT);
    pinMode (ALA_BU_PIN,INPUT);
-  
+   pinMode (AFF_BU_PIN,INPUT);
   
    digitalWrite(KY_CLK_PIN,true);
    digitalWrite(KY_DT_PIN,true);
@@ -119,19 +131,7 @@ void setup(void)
 void loop(void)
 {
   
-  if (mode == 0){
-    affichage();
-  }
-  else if ( mode == 1) 
-  {
-    reglageHorloge();
-    mode = 0;
-  }
-  else
-  {
-    reglageAlarme();
-    mode = 0;
-  }
+  affichage();
   if (digitalRead(SWITCH_PIN) == HIGH && !horloge.checkAlarmEnabled(1))
     {
       horloge.turnOnAlarm(1);
@@ -139,6 +139,7 @@ void loop(void)
     else if ( digitalRead(SWITCH_PIN) == LOW && horloge.checkAlarmEnabled(1) )
     {
       horloge.turnOffAlarm(1);
+      alarmeDeclenchee=false;
     }
 
   if ( horloge.checkAlarmEnabled(1) )
@@ -149,39 +150,60 @@ void loop(void)
   {
     digitalWrite(LED_PIN,LOW);
   }
-  if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON )
+  if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON && alarmeDeclenchee == false)
   {
-    mode =1;
     Serial.println("activation reglage Horloge");
     lastTime2 = millis();
+    reglageHorloge();
   }
-  if (digitalRead(ALA_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON )
+  if (digitalRead(ALA_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON && alarmeDeclenchee == false)
   {
-    mode =2;
     Serial.println("activation reglage Alarme");
     lastTime2 = millis();
+    reglageAlarme();
   }
-  if (horloge.checkIfAlarm(1))
+  if (digitalRead(HOR_BU_PIN) == HIGH || digitalRead(ALA_BU_PIN) == HIGH || digitalRead(AFF_BU_PIN) == HIGH && alarmeDeclenchee)
   {
-    digitalWrite(LED_ALA_PIN,HIGH);
+    alarmeDeclenchee = false;
+    lastTime2 = millis();
+  }
+  if (horloge.checkIfAlarm(1) && horloge.checkAlarmEnabled(1))
+  {
+    alarmeDeclenchee = true;
+
     Serial.println("Alarme declenchée");
+  }
+  if (alarmeDeclenchee)
+  {
+        digitalWrite(LED_ALA_PIN,HIGH);
+        tone(BUZZER_PIN,262,1000);
+  } else
+  {
+    digitalWrite(LED_ALA_PIN,LOW);
+     noTone(BUZZER_PIN);
+  }
+}
+
+void gestionAffichageAnnexe(char *psz )
+{
+    P.displayAnimate();
+  if (digitalRead(AFF_BU_PIN) == HIGH )
+  {
+    getAlarme(szMesg);
   }
   else
   {
-    digitalWrite(LED_ALA_PIN,LOW);
+    getDate(szMesg);
   }
+  P.displayReset(0);
 }
 
 void affichage(void )
 {
 static uint32_t lastTime = 0; // millis() memory
-  static uint8_t  display = 0;  // current display mode
   static bool flasher = false;  // seconds passing flasher
 
-  P.displayAnimate();
-  getDate(szMesg);
-  P.displayReset(0);
-  
+  gestionAffichageAnnexe(szMesg);
 
   // Finally, adjust the time string if we have to
   if (millis() - lastTime >= 500)
@@ -198,49 +220,94 @@ void reglageHorloge(void)
   int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
   byte reglage =0;
-  byte valeur = horloge.getHour(h12Flag,pmFlag);
-  byte heure;
+  byte valeur;
+  byte heure = horloge.getHour(h12Flag,pmFlag);
+  byte annee = horloge.getYear();
+  byte jour = horloge.getDate();
+  byte mois = horloge.getMonth(siecle);
+  byte jourDeSemaine = horloge.getDoW();
   byte minu=horloge.getMinute();
-  byte modulo = 24;
-  while (reglage <2)
+  byte modulo = 0 ;
+  while (reglage <6)
   {
     P.displayAnimate();
-    strcpy(szMesg, "Horloge");
-    P.displayReset(0);
-    
-    if (reglage == 0)
+    switch(reglage)
     {
+      case 0:
+      strcpy(szMesg, "Annee");
+      sprintf(szTime, "%04d%:", valeur);
+      break;
+      case 1:
+      strcpy(szMesg, "Mois");
       sprintf(szTime, "%02d%:", valeur);
-    }else
-    {
-     sprintf(szTime, "%02d:%02d", heure , valeur);
+      break;
+     case 2:
+      strcpy(szMesg, "J.Mois");
+      sprintf(szTime, "%02d%/%02d%:", valeur,mois);
+      break;      
+      case 3:
+      strcpy(szMesg, "J.Semaine");
+      sprintf(szTime, "-%d-", valeur);
+      break;
+      case 4:
+      strcpy(szMesg, "Heure");
+      sprintf(szTime, "%02d%:", valeur);
+      break;
+      case 5:
+      strcpy(szMesg, "Minute");
+      sprintf(szTime, "%02d:%02d", heure , valeur);
+      break;
     }
+
+    P.displayReset(0);
     P.displayReset(1);
+    
+    
     
     if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON)
     {
       Serial.print("Reglage Horloge ");
+       switch(reglage)
+      {
+        case 0:
+          annee = valeur;
+          modulo = 12;
+          valeur = mois;
+        break;
+        case 1:
+          mois = valeur;
+          modulo = joursDansMois[valeur-1];
+          valeur = jour;
+        break;
+       case 2:
+          jour = valeur;
+          modulo = 7;
+          valeur = jourDeSemaine;
+        break;      
+        case 3:
+          jourDeSemaine = valeur;
+          modulo = 24;
+          valeur = heure;
+        break;
+        case 4:
+          heure=valeur;
+          modulo = 60;
+          valeur = minu;
+        break;
+        case 5:
+          horloge.setYear(annee);
+          horloge.setMonth(mois);
+          horloge.setDate(jour);
+          horloge.setDoW(jourDeSemaine);
+          horloge.setHour(heure);
+          horloge.setMinute(valeur);
+          Serial.print("mise a jour Heure ");
+          Serial.println(horloge.getHour(h12Flag,pmFlag));
+          Serial.print("mise a jour minutes ");
+          Serial.println(horloge.getMinute());
+        break;
+      }
 
-      if (reglage == 0)
-      {
-        
-        heure=valeur;
-        
-        
-        Serial.print("Valeur minutes ");   
-        valeur = minu;
-        modulo = 60;
-      }
-      else
-      {
-        
-        horloge.setHour(heure);
-        horloge.setMinute(valeur);
-        Serial.print("mise a jour Heure ");
-        Serial.println(horloge.getHour(h12Flag,pmFlag));
-        Serial.print("mise a jour minutes ");
-        Serial.println(horloge.getMinute());
-      }
       reglage ++;
       lastTime2 = millis();
     }
@@ -253,15 +320,27 @@ void reglageHorloge(void)
    { 
           
         if (digitalRead(KY_DT_PIN) != Pin_clk_Aktuell) 
-        {  
+        {  if (reglage == 1 or reglage ==2 or reglage ==3)
+            {
+              valeur= (valeur)%modulo+1;  
+            } else {
+            valeur= (valeur+1)%modulo;  
+            }
             // Pin_CLK a changé en premier
-            valeur= (valeur+1+modulo)%modulo;
+            
             
         } 
           
         else
         {       // Sinon Pin_DT achangé en premier
+          if (reglage == 1 or reglage ==2 or reglage ==3)
+          {
+            valeur= (valeur-2+modulo)%modulo+1;
+          }
+          else
+          {
             valeur= (valeur-1+modulo)%modulo;
+          }
         }
       Serial.print("Horloge mode ");
       Serial.print(reglage);        
