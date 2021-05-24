@@ -66,7 +66,11 @@ byte joursDansMois [] = {31,28,31,30,31,30,31,31,30,31,30,31};
 MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 DS3231 horloge;
 boolean alarmeDeclenchee = false;
-
+int intensite =5;
+  int Pin_clk_Aktuell;
+  int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
+  int Pin_dt_Actuelle;
+  int Pin_dt_Ancien=digitalRead(KY_DT_PIN);
 void getTime(char *psz, bool f = true)
 // Code for reading clock time
 {
@@ -137,6 +141,23 @@ void setup(void)
 
 void loop(void)
 {
+   // Lecture des statuts actuels
+   Pin_clk_Aktuell = digitalRead(KY_CLK_PIN);
+   Pin_dt_Actuelle = digitalRead(KY_DT_PIN);
+   if (Pin_clk_Aktuell != Pin_clk_Letzter or Pin_dt_Actuelle != Pin_dt_Ancien )
+   { 
+        intensite = intensite + calculRotation(Pin_clk_Aktuell,Pin_dt_Actuelle,Pin_clk_Letzter,Pin_dt_Ancien);
+        if (intensite > 15)
+        {
+          intensite =15;
+        }
+        if (intensite < 0)
+        {
+          intensite = 0;
+        }
+   }
+  P.setIntensity(intensite);
+  
   affichage();
 
   // On verifie le bon fonctionnement du switch pour l'activation du mode alarme
@@ -192,6 +213,8 @@ void loop(void)
     digitalWrite(LED_ALA_PIN,LOW);
      noTone(BUZZER_PIN);
   }
+     Pin_clk_Letzter = Pin_clk_Aktuell;
+   Pin_dt_Ancien = Pin_dt_Actuelle;
 }
 
 void gestionAffichageAnnexe(char *psz )
@@ -233,10 +256,9 @@ static uint32_t lastTime = 0; // millis() memory
 }
 void reglageHorloge(void)
 {
-  int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
-  int Pin_dt_Actuelle;
-  int Pin_dt_Ancien=digitalRead(KY_DT_PIN);
+  Pin_dt_Actuelle;
+  Pin_dt_Ancien=digitalRead(KY_DT_PIN);
   byte reglage =0;
   byte valeur;
   byte heure = horloge.getHour(h12Flag,pmFlag);
@@ -378,10 +400,8 @@ void reglageHorloge(void)
 
 void reglageAlarme(void)
 {
-  int Pin_clk_Aktuell;
-  int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
-  int Pin_dt_Actuelle;
-  int Pin_dt_Ancien=digitalRead(KY_DT_PIN);
+  Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
+  Pin_dt_Ancien=digitalRead(KY_DT_PIN);
   byte reglage =0;
   byte modulo = 24;
   byte jourAlarme, heureAlarme, minuteAlarme, secondeAlarme, alarmBits;
