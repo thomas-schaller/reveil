@@ -28,17 +28,20 @@
 #define CS_PIN    10
 
 // potentiometre KY-040
-#define KY_DT_PIN 5 
+#define KY_DT_PIN 2 
 #define KY_CLK_PIN 3
 
 #define HOR_BU_PIN 7 
 #define ALA_BU_PIN 8 
 #define AFF_BU_PIN 4
 
-#define LED_ALA_PIN A3
+#define LED_ALA_PIN A1
 
+#define LED_AFF_BU_PIN 13
+#define LED_HOR_BU_PIN 9
+#define LED_ALA_BU_PIN A3
 //info alarme
-#define LED_PIN 9
+#define LED_PIN A0
 #define SWITCH_PIN 6
 #define BUZZER_PIN A2
 
@@ -110,7 +113,11 @@ void setup(void)
   
    pinMode (LED_PIN,OUTPUT);
    pinMode(LED_ALA_PIN,OUTPUT);
-   
+
+  pinMode(LED_AFF_BU_PIN,OUTPUT);
+  pinMode(LED_HOR_BU_PIN,OUTPUT);
+  pinMode(LED_ALA_BU_PIN,OUTPUT);
+
   P.begin(2);
 
   P.setZone(0, 0, MAX_DEVICES-5);
@@ -130,8 +137,10 @@ void setup(void)
 
 void loop(void)
 {
-  
   affichage();
+
+  // On verifie le bon fonctionnement du switch pour l'activation du mode alarme
+  //Serial.println(digitalRead(SWITCH_PIN)== HIGH);
   if (digitalRead(SWITCH_PIN) == HIGH && !horloge.checkAlarmEnabled(1))
     {
       horloge.turnOnAlarm(1);
@@ -141,14 +150,15 @@ void loop(void)
       horloge.turnOffAlarm(1);
       alarmeDeclenchee=false;
     }
-
   if ( horloge.checkAlarmEnabled(1) )
   {
     digitalWrite(LED_PIN,HIGH);
+    //Serial.println("led mode alarme allume");
   }
   else
   {
     digitalWrite(LED_PIN,LOW);
+    //Serial.println("led mode alarme eteinds");
   }
   if (digitalRead(HOR_BU_PIN) == HIGH && millis() - lastTime2 >= PAUSE_BOUTON && alarmeDeclenchee == false)
   {
@@ -190,10 +200,16 @@ void gestionAffichageAnnexe(char *psz )
   if (digitalRead(AFF_BU_PIN) == HIGH )
   {
     getAlarme(szMesg);
+      digitalWrite(LED_AFF_BU_PIN,HIGH);
+    digitalWrite(LED_HOR_BU_PIN,LOW);
+    digitalWrite(LED_ALA_BU_PIN,LOW);
   }
   else
   {
     getDate(szMesg);
+    digitalWrite(LED_AFF_BU_PIN,HIGH);
+    digitalWrite(LED_HOR_BU_PIN,HIGH);
+    digitalWrite(LED_ALA_BU_PIN,HIGH);
   }
   P.displayReset(0);
 }
@@ -219,6 +235,8 @@ void reglageHorloge(void)
 {
   int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
+  int Pin_dt_Actuelle;
+  int Pin_dt_Ancien=digitalRead(KY_DT_PIN);
   byte reglage =0;
   byte valeur;
   byte heure = horloge.getHour(h12Flag,pmFlag);
@@ -228,6 +246,9 @@ void reglageHorloge(void)
   byte jourDeSemaine = horloge.getDoW();
   byte minu=horloge.getMinute();
   byte modulo = 0 ;
+   digitalWrite(LED_AFF_BU_PIN,LOW);
+  digitalWrite(LED_HOR_BU_PIN,HIGH);
+  digitalWrite(LED_ALA_BU_PIN,LOW);
   while (reglage <6)
   {
     P.displayAnimate();
@@ -235,7 +256,7 @@ void reglageHorloge(void)
     {
       case 0:
       strcpy(szMesg, "Annee");
-      sprintf(szTime, "%04d%:", valeur);
+      sprintf(szTime, "2%03d%:", valeur);
       break;
       case 1:
       strcpy(szMesg, "Mois");
@@ -314,12 +335,12 @@ void reglageHorloge(void)
  
     // Lecture des statuts actuels
    Pin_clk_Aktuell = digitalRead(KY_CLK_PIN);
-    
+   Pin_dt_Actuelle = digitalRead(KY_DT_PIN);
    // Vérification de changement
-   if (Pin_clk_Aktuell != Pin_clk_Letzter)
+   if (Pin_clk_Aktuell != Pin_clk_Letzter or Pin_dt_Actuelle != Pin_dt_Ancien )
    { 
-          
-        if (digitalRead(KY_DT_PIN) != Pin_clk_Aktuell) 
+        int rotation = calculRotation(Pin_clk_Aktuell,Pin_dt_Actuelle,Pin_clk_Letzter,Pin_dt_Ancien);
+        if (rotation > 0 ) 
         {  if (reglage == 1 or reglage ==2 or reglage ==3)
             {
               valeur= (valeur)%modulo+1;  
@@ -351,6 +372,7 @@ void reglageHorloge(void)
     
    // Préparation de la prochaine exécution:
    Pin_clk_Letzter = Pin_clk_Aktuell;
+   Pin_dt_Ancien = Pin_dt_Actuelle;
   }  
 }
 
@@ -358,12 +380,17 @@ void reglageAlarme(void)
 {
   int Pin_clk_Aktuell;
   int Pin_clk_Letzter= digitalRead(KY_CLK_PIN);
+  int Pin_dt_Actuelle;
+  int Pin_dt_Ancien=digitalRead(KY_DT_PIN);
   byte reglage =0;
   byte modulo = 24;
   byte jourAlarme, heureAlarme, minuteAlarme, secondeAlarme, alarmBits;
   bool alarmDy, alarmH12Flag, alarmPmFlag;
   horloge.getA1Time(jourAlarme,heureAlarme,minuteAlarme,secondeAlarme,alarmBits, alarmDy, alarmH12Flag, alarmPmFlag);
   byte valeur = heureAlarme;
+  digitalWrite(LED_AFF_BU_PIN,LOW);
+  digitalWrite(LED_HOR_BU_PIN,LOW);
+  digitalWrite(LED_ALA_BU_PIN,HIGH);
   while (reglage <2)
   {
       P.displayAnimate();
@@ -410,22 +437,15 @@ void reglageAlarme(void)
  
     // Lecture des statuts actuels
    Pin_clk_Aktuell = digitalRead(KY_CLK_PIN);
-    
+    Pin_dt_Actuelle = digitalRead(KY_DT_PIN);
    // Vérification de changement
-   if (Pin_clk_Aktuell != Pin_clk_Letzter)
+   if ( Pin_clk_Aktuell  != Pin_clk_Letzter or Pin_dt_Actuelle != Pin_dt_Ancien)
    { 
-          
-        if (digitalRead(KY_DT_PIN) != Pin_clk_Aktuell) 
-        {  
-            // Pin_CLK a changé en premier
-            valeur= (valeur+1+modulo)%modulo;
-            
-        } 
-          
-        else
-        {       // Sinon Pin_DT achangé en premier
-            valeur= (valeur-1+modulo)%modulo;
-        }
+    Serial.print("clk ");
+    Serial.println(Pin_clk_Aktuell);
+    Serial.print("dt ");
+    Serial.println(Pin_dt_Actuelle);
+    valeur= (valeur+1*calculRotation(Pin_clk_Aktuell,Pin_dt_Actuelle,Pin_clk_Letzter,Pin_dt_Ancien) + modulo)%modulo;
       Serial.print("Alarme mode ");
       Serial.print(reglage);        
       Serial.print(" valeur ");
@@ -435,5 +455,51 @@ void reglageAlarme(void)
     
    // Préparation de la prochaine exécution:
    Pin_clk_Letzter = Pin_clk_Aktuell;
+   Pin_dt_Ancien = Pin_dt_Actuelle;
   }
 }
+  int calculRotation(int valeurClockActuelle, int valeurDtActuelle,int valeurClockPrecedente,int valeurDtPrecedente)
+  {
+    int resultatRotation = 0; 
+    if ( valeurClockActuelle == LOW && valeurDtActuelle == LOW )
+    {
+      if ( valeurClockPrecedente == HIGH )
+      {
+        resultatRotation = -1; 
+      }
+      else
+      {
+        resultatRotation = 1;
+      }
+    } else if ( valeurClockActuelle == HIGH && valeurDtActuelle == LOW )
+    {
+      if ( valeurClockPrecedente == HIGH )
+      {
+        resultatRotation = -1; 
+      }
+      else
+      {
+        resultatRotation = 1;
+      }
+    } else if ( valeurClockActuelle == HIGH && valeurDtActuelle == HIGH )
+    {
+      if ( valeurClockPrecedente == LOW )
+      {
+        resultatRotation = -1; 
+      }else
+      {
+        resultatRotation = 1;
+      }
+     } else if ( valeurClockActuelle == LOW && valeurDtActuelle == HIGH )
+    {
+      if ( valeurClockPrecedente == LOW )
+      {
+        resultatRotation = -1; 
+      }
+      else
+      {
+        resultatRotation = 1;
+      }
+    }
+    return resultatRotation;
+  }
